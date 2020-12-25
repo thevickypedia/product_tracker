@@ -1,3 +1,4 @@
+import logging
 import os
 
 import boto3
@@ -13,6 +14,7 @@ def amazon(asin):
     response.html.render()
 
     title = response.html.xpath('//*[@id="productTitle"]', first=True).text
+    logger.info(f' Title: {title}')
 
     avail_check = response.html.xpath('//*[@id="availability"]', first=True)
     if 'Currently unavailable.' in avail_check.text:
@@ -23,16 +25,19 @@ def amazon(asin):
         availability = avail_check.text
     else:
         availability = 'Unknown'
+    logger.info(f' Availability: {availability}')
 
     price = response.html.xpath('//*[@id="priceblock_ourprice"]', first=True)
     if price:
         price = price.text
+        logger.info(f' Price: {price}')
 
     prime_check = response.html.xpath('//*[@id="creturns-return-policy-separator"]', first=True)
     if prime_check and prime_check.text == '&':
         prime = 'True'
     else:
         prime = 'False'
+    logger.info(f' Prime: {prime}')
 
     if price:
         return f'Title: {title}\nAvailability: {availability}\nPrice: {price}\nPrime: {prime}\nURL: {url}'
@@ -50,12 +55,15 @@ def walmart(product_id):
 
     raw_name = soup.find_all('h1', {'class': 'prod-ProductTitle prod-productTitle-buyBox font-bold'})[0]
     title = raw_name.text.strip()
+    logger.info(f' Title: {title}')
 
     raw_price = soup.find_all('span', {'class': 'price display-inline-block arrange-fit price price--stylized'})[0]
     price = raw_price.find('span').text
+    logger.info(f' Price: {price}')
 
     raw_avail = soup.find_all('section', {'class': 'prod-ProductCTA primaryProductCTA-marker'})[0]
     availability = raw_avail.find('button').find('span').text
+    logger.info(f' Availability: {availability}')
 
     raw_delivery = soup.find_all('div', {'class': 'fulfillment-buy-box-update'})[0]
     fulfillment_box = raw_delivery.find_all('div')
@@ -69,6 +77,7 @@ def walmart(product_id):
                 if appender and appender not in delivery_options:
                     delivery_options.append(appender)
     delivery_options = ', '.join(delivery_options)
+    logger.info(f' Delivery Options: {delivery_options}')
 
     return f'Title: {title}\nAvailability: {availability}\nPrice: {price}\n' \
            f'Delivery Options: {delivery_options}\nURL: {url}'
@@ -82,10 +91,17 @@ def notify(message):
         sns = boto3.client('sns', aws_access_key_id=access_key, aws_secret_access_key=secret_key)
     else:
         sns = boto3.client('sns')
-    sns.publish(PhoneNumber=phone_number, Message=message)
+    response = sns.publish(PhoneNumber=phone_number, Message=message)
+    if response.get('ResponseMetadata').get('HTTPStatusCode') == 200:
+        logger.info('Notification has been sent.')
+    else:
+        logger.info(f'Unable to send notification.\n{response}')
 
 
 if __name__ == '__main__':
+    logging.getLogger(name='pyppeteer.launcher').propagate = False
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(' Whiplash')
     amazon(asin='B08KTPHGPP')
     status = walmart(product_id='427810711')
     notify(message=status)
