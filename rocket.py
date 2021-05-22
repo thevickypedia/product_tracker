@@ -1,12 +1,13 @@
-import logging
-import os
+from logging import basicConfig, getLogger, INFO
+from os import environ
 
-import boto3
-import requests
+from boto3 import client
 from bs4 import BeautifulSoup
+from requests import get
 from requests_html import HTMLSession
 
 
+# noinspection PyUnresolvedReferences
 def amazon(asin):
     url = f'https://www.amazon.com/dp/{asin}/'
     session = HTMLSession()
@@ -50,7 +51,7 @@ def walmart(product_id):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
                       'Chrome/58.0.3029.110 Safari/537.3'}
     url = f'https://www.walmart.com/ip/{product_id}'
-    response = requests.get(url=url, headers=headers).text
+    response = get(url=url, headers=headers).text
     soup = BeautifulSoup(response, 'lxml')
 
     raw_name = soup.find_all('h1', {'class': 'prod-ProductTitle prod-productTitle-buyBox font-bold'})[0]
@@ -69,13 +70,9 @@ def walmart(product_id):
     fulfillment_box = raw_delivery.find_all('div')
     delivery_options = []
     for item in fulfillment_box:
-        div = item.find('div')
-        if div:
-            options = div.find('span')
-            if options:
-                appender = options.text
-                if appender and appender not in delivery_options:
-                    delivery_options.append(appender)
+        if (div := item.find('div')) and (options := div.find('span')):
+            if (appender := options.text) and appender not in delivery_options:
+                delivery_options.append(appender)
     delivery_options = ', '.join(delivery_options)
     logger.info(f' Delivery Options: {delivery_options}')
 
@@ -84,24 +81,25 @@ def walmart(product_id):
 
 
 def notify(message):
-    phone_number = os.environ.get('PHONE')
-    access_key = os.environ.get('ACCESS_KEY')
-    secret_key = os.environ.get('SECRET_KEY')
-    if access_key and secret_key:
-        sns = boto3.client('sns', aws_access_key_id=access_key, aws_secret_access_key=secret_key)
+    if (access_key := environ.get('ACCESS_KEY')) and (secret_key := environ.get('SECRET_KEY')):
+        sns = client('sns', aws_access_key_id=access_key, aws_secret_access_key=secret_key)
     else:
-        sns = boto3.client('sns')
-    response = sns.publish(PhoneNumber=phone_number, Message=message)
-    if response.get('ResponseMetadata').get('HTTPStatusCode') == 200:
-        logger.info('Notification has been sent.')
+        sns = client('sns')
+    if not (phone_number := environ.get('PHONE')):
+        logger.error('Phone number is not stored as ENV VAR to kick off notifications.')
     else:
-        logger.info(f'Unable to send notification.\n{response}')
+        response = sns.publish(PhoneNumber=phone_number, Message=message)
+        if response.get('ResponseMetadata').get('HTTPStatusCode') == 200:
+            logger.info('Notification has been sent.')
+        else:
+            logger.error(f'Unable to send notification.\n{response}')
 
 
 if __name__ == '__main__':
-    logging.getLogger(name='pyppeteer.launcher').propagate = False
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(' Whiplash')
-    amazon(asin='B08KTPHGPP')
+    getLogger(name='pyppeteer.launcher').propagate = False
+    basicConfig(format='%(asctime)s - %(levelname)s - %(funcName)s - Line: %(lineno)d - %(message)s', level=INFO)
+    logger = getLogger(__name__)
+    status = amazon(asin='B08KTPHGPP')
+    notify(message=status)
     status = walmart(product_id='427810711')
     notify(message=status)
